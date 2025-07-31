@@ -82,14 +82,28 @@ void* handleClientConnection(void *arg) {
 		}
 	}
 	if (resource < 0) goto error_request;
-	char body_ok[] = "<html><body><h1>Hello world!</h1></body></html>";
+	FILE *file_ptr = fopen(allowed_resources[resource].file_path, "r");
+	if (file_ptr == NULL) goto error_request;
+	fseek(file_ptr, 0, SEEK_END);
+	int file_size = ftell(file_ptr);
+	fseek(file_ptr, 0, SEEK_SET);
+	char *data_ptr_heap = malloc(file_size + 1);
+	if (data_ptr_heap == NULL) {
+		fclose(file_ptr);
+		goto error_request;
+	}
+	fread(data_ptr_heap, sizeof(char), file_size, file_ptr);
+	data_ptr_heap[file_size] = '\0';
+	fclose(file_ptr);
+	// Temporal answers.
 	char response_ok[BUFFER_SIZE];
 	sprintf(response_ok, "HTTP/1.1 200 OK\r\n"
 		 "Content-Type: text/html\r\n"
 		 "Content-Length: %d\r\n"
 		 "\r\n"
-		 "%s", (int)strlen(body_ok), body_ok);
+		 "%s", file_size, data_ptr_heap);
 	int sending_ok = send(*socketfd_ptr, (void *)response_ok, strlen(response_ok), 0);
+	free(data_ptr_heap);
 	if (sending_ok < 0) perror(">>Could not sent response to client");
 	goto end_connection;
 	error_request:;
