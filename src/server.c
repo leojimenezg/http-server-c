@@ -5,13 +5,16 @@
 #include <arpa/inet.h>  // Network conversions.
 #include <unistd.h>     // UNIX system calls.
 #include <pthread.h>    // POSIX threads.
+#include <stdatomic.h>  // Atomic types.
 
 #define IP_VERSION AF_INET
 #define SOCKET_TYPE SOCK_STREAM
 #define MAX_PENDING 10
 #define BUFFER_SIZE 1024
+#define HTTP_VERB_LEN 7
+#define HTTP_URL_LEN 63
 
-static int current_connections = 0;
+_Atomic static int current_connections = 0;
 
 typedef struct sockaddr_in socket_info_ipv4;
 typedef struct {
@@ -41,7 +44,32 @@ void* handleClientConnection(void *arg) {
 		goto end_connection;
 	}
 	buffer[receiving] = '\0';
-	printf(">>Request received from client!\n");
+	char *separation1_ptr = strchr(buffer, ' ');
+	if (separation1_ptr == NULL) {
+		// Answer with error.
+		goto end_connection;
+	}
+	int http_verb_len = separation1_ptr - buffer;
+	if (http_verb_len > HTTP_VERB_LEN) {
+		// Answer with error.
+		goto end_connection;
+	}
+	char http_verb[HTTP_VERB_LEN + 1];
+	strncpy(http_verb, buffer, http_verb_len);
+	http_verb[http_verb_len] = '\0';
+	char *separation2_ptr = strchr(separation1_ptr + 1, ' ');
+	if (separation2_ptr == NULL) {
+		// Answer with error.
+		goto end_connection;
+	}
+	int url_len = separation2_ptr - (separation1_ptr + 1);
+	if (url_len > HTTP_URL_LEN) {
+		// Answer with error.
+		goto end_connection;
+	}
+	char url[HTTP_URL_LEN + 1];
+	strncpy(url, separation1_ptr + 1, url_len);
+	url[url_len] = '\0';
 	char body[] = "<html><body><h1>Hello world!</h1></body></html>";
 	char response[BUFFER_SIZE];
 	sprintf(response, "HTTP/1.1 200 OK\r\n"
@@ -51,9 +79,10 @@ void* handleClientConnection(void *arg) {
 		 "%s", (int)strlen(body), body);
 	int sending = send(*socketfd_ptr, (void *)response, strlen(response), 0);
 	if (sending < 0) perror(">>Could not sent response to client");
-	printf(">>Answer sent to client successfully!");
+	printf(">>Answer sent to client successfully!\n");
 	end_connection:;
 	close(*socketfd_ptr);
+	current_connections--;
 	free(socketfd_ptr);
 	printf(">>Closed connection with client\n");
 	return 0;
@@ -84,15 +113,18 @@ int main(int argc, char **argv) {
 	int listening = listen(server.socketfd, MAX_PENDING);
 	if (listening < 0) errorAndExit(">>Could not listen in socket");
 	while (1) {
+		if (current_connections >= server.max_current_connections) goto next_iteration;
 		int new_connection = newClientConnection(&server);
 		if (new_connection < 0) {
 			perror(">>Could not accept new client connection");
 			goto next_iteration;
 		}
+		current_connections++;
 		int *connection_ptr_heap = malloc(sizeof(int));
 		if (connection_ptr_heap == NULL) {
 			perror(">>Could not allocate memory for new client connection");
 			close(new_connection);
+			current_connections--;
 			goto next_iteration;
 		}
 		*connection_ptr_heap = new_connection;
@@ -102,6 +134,7 @@ int main(int argc, char **argv) {
 		if (pthread_create(&thread, &attributes, handleClientConnection, connection_ptr_heap) != 0) {
 			close(new_connection);
 			free(connection_ptr_heap);
+			current_connections--;
 			perror(">>Could not create new thread to handle client connection");
 		}
 		pthread_attr_destroy(&attributes);
