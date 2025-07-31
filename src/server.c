@@ -17,11 +17,27 @@
 _Atomic static int current_connections = 0;
 
 typedef struct sockaddr_in socket_info_ipv4;
+
 typedef struct {
 	int socketfd;
 	int max_current_connections;
 	socket_info_ipv4 socket_info;
 } Server_Info;
+
+typedef struct {
+	char *url;
+	char *file_path;
+} Resource_Info;
+
+Resource_Info allowed_resources[] = {
+	{"/", "public/html/index.html"},
+	{"/index", "public/html/index.html"},
+	{"/about", "public/html/about.html"},
+	{"/styles", "public/css/styles.css"},
+	{"/script", "public/js/script.js"},
+	{"/favicon.ico", "public/assets/favicon.ico"},
+	{NULL, NULL},
+};
 
 void errorAndExit(const char *err) {
 	perror(err);
@@ -36,55 +52,62 @@ int newClientConnection(Server_Info *server) {
 }
 
 void* handleClientConnection(void *arg) {
+	printf(">>Thread%p: New client connection accepted\n", (void*)pthread_self());
+	fflush(stdout);
 	int *socketfd_ptr = (int*) arg;  // File descriptor allocated in heap.
 	char buffer[BUFFER_SIZE + 1];
 	int receiving = recv(*socketfd_ptr, (void *)buffer, BUFFER_SIZE, 0);
-	if (receiving < 1) {
-		perror(">>No information received from client"); 
-		goto end_connection;
-	}
+	if (receiving < 1) goto error_request;
 	buffer[receiving] = '\0';
 	char *separation1_ptr = strchr(buffer, ' ');
-	if (separation1_ptr == NULL) {
-		// Answer with error.
-		goto end_connection;
-	}
+	if (separation1_ptr == NULL) goto error_request;
 	int http_verb_len = separation1_ptr - buffer;
-	if (http_verb_len > HTTP_VERB_LEN) {
-		// Answer with error.
-		goto end_connection;
-	}
+	if (http_verb_len > HTTP_VERB_LEN) goto error_request;
 	char http_verb[HTTP_VERB_LEN + 1];
 	strncpy(http_verb, buffer, http_verb_len);
 	http_verb[http_verb_len] = '\0';
+	if (strcmp(http_verb, "GET") != 0) goto error_request;
 	char *separation2_ptr = strchr(separation1_ptr + 1, ' ');
-	if (separation2_ptr == NULL) {
-		// Answer with error.
-		goto end_connection;
-	}
+	if (separation2_ptr == NULL) goto error_request;
 	int url_len = separation2_ptr - (separation1_ptr + 1);
-	if (url_len > HTTP_URL_LEN) {
-		// Answer with error.
-		goto end_connection;
-	}
+	if (url_len > HTTP_URL_LEN) goto error_request;
 	char url[HTTP_URL_LEN + 1];
 	strncpy(url, separation1_ptr + 1, url_len);
 	url[url_len] = '\0';
-	char body[] = "<html><body><h1>Hello world!</h1></body></html>";
-	char response[BUFFER_SIZE];
-	sprintf(response, "HTTP/1.1 200 OK\r\n"
+	int resource = -1;
+	for (int i = 0; allowed_resources[i].url != NULL; i++) {
+		if (strcmp(url, allowed_resources[i].url) == 0) {
+			resource = i;
+			break;
+		}
+	}
+	if (resource < 0) goto error_request;
+	char body_ok[] = "<html><body><h1>Hello world!</h1></body></html>";
+	char response_ok[BUFFER_SIZE];
+	sprintf(response_ok, "HTTP/1.1 200 OK\r\n"
 		 "Content-Type: text/html\r\n"
 		 "Content-Length: %d\r\n"
 		 "\r\n"
-		 "%s", (int)strlen(body), body);
-	int sending = send(*socketfd_ptr, (void *)response, strlen(response), 0);
-	if (sending < 0) perror(">>Could not sent response to client");
-	printf(">>Answer sent to client successfully!\n");
+		 "%s", (int)strlen(body_ok), body_ok);
+	int sending_ok = send(*socketfd_ptr, (void *)response_ok, strlen(response_ok), 0);
+	if (sending_ok < 0) perror(">>Could not sent response to client");
+	goto end_connection;
+	error_request:;
+	char body_fail[] = "<html><body><h1>Request Failed!</h1></body></html>";
+	char response_fail[BUFFER_SIZE];
+	sprintf(response_fail, "HTTP/1.1 400 Bad Request\r\n"
+		 "Content-Type: text/html\r\n"
+		 "Content-Length: %d\r\n"
+		 "\r\n"
+		 "%s", (int)strlen(body_fail), body_fail);
+	int sending_fail = send(*socketfd_ptr, (void *)response_fail, strlen(response_fail), 0);
+	if (sending_fail < 0) perror(">>Could not sent response to client");
 	end_connection:;
 	close(*socketfd_ptr);
 	current_connections--;
 	free(socketfd_ptr);
-	printf(">>Closed connection with client\n");
+	printf(">>Thread%p: Closed connection with client\n", (void*)pthread_self());
+	fflush(stdout);
 	return 0;
 }
 
