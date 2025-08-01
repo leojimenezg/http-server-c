@@ -57,20 +57,20 @@ void* handleClientConnection(void *arg) {
 	int *socketfd_ptr = (int*) arg;  // File descriptor allocated in heap.
 	char buffer[BUFFER_SIZE + 1];
 	int receiving = recv(*socketfd_ptr, (void *)buffer, BUFFER_SIZE, 0);
-	if (receiving < 1) goto error_request;
+	if (receiving < 1) goto error_process;
 	buffer[receiving] = '\0';
 	char *separation1_ptr = strchr(buffer, ' ');
-	if (separation1_ptr == NULL) goto error_request;
+	if (separation1_ptr == NULL) goto error_process;
 	int http_verb_len = separation1_ptr - buffer;
-	if (http_verb_len > HTTP_VERB_LEN) goto error_request;
+	if (http_verb_len > HTTP_VERB_LEN) goto error_process;
 	char http_verb[HTTP_VERB_LEN + 1];
 	strncpy(http_verb, buffer, http_verb_len);
 	http_verb[http_verb_len] = '\0';
-	if (strcmp(http_verb, "GET") != 0) goto error_request;
+	if (strcmp(http_verb, "GET") != 0) goto error_process;
 	char *separation2_ptr = strchr(separation1_ptr + 1, ' ');
-	if (separation2_ptr == NULL) goto error_request;
+	if (separation2_ptr == NULL) goto error_process;
 	int url_len = separation2_ptr - (separation1_ptr + 1);
-	if (url_len > HTTP_URL_LEN) goto error_request;
+	if (url_len > HTTP_URL_LEN) goto error_process;
 	char url[HTTP_URL_LEN + 1];
 	strncpy(url, separation1_ptr + 1, url_len);
 	url[url_len] = '\0';
@@ -82,6 +82,7 @@ void* handleClientConnection(void *arg) {
 		}
 	}
 	if (resource < 0) goto error_request;
+	// TODO: Handle files bigger than BUFFER_SIZE and change Content-Type.
 	FILE *file_ptr = fopen(allowed_resources[resource].file_path, "r");
 	if (file_ptr == NULL) goto error_request;
 	fseek(file_ptr, 0, SEEK_END);
@@ -95,19 +96,32 @@ void* handleClientConnection(void *arg) {
 	fread(data_ptr_heap, sizeof(char), file_size, file_ptr);
 	data_ptr_heap[file_size] = '\0';
 	fclose(file_ptr);
-	// Temporal answers.
-	char response_ok[BUFFER_SIZE];
-	sprintf(response_ok, "HTTP/1.1 200 OK\r\n"
+	char response[BUFFER_SIZE];
+	// Successful request-answer (200 status code).
+	sprintf(response, "HTTP/1.1 200 OK\r\n"
 		 "Content-Type: text/html\r\n"
 		 "Content-Length: %d\r\n"
 		 "\r\n"
 		 "%s", file_size, data_ptr_heap);
-	int sending_ok = send(*socketfd_ptr, (void *)response_ok, strlen(response_ok), 0);
+	int sending_ok = send(*socketfd_ptr, (void *)response, strlen(response), 0);
 	free(data_ptr_heap);
 	if (sending_ok < 0) perror(">>Could not sent response to client");
 	goto end_connection;
+	// Invalid request-answer (404 status code).
 	error_request:;
-	char body_fail[] = "<html><body><h1>Request Failed!</h1></body></html>";
+	char body_invalid[] = "<html><body><h1>Invalid Resource</h1></body></html>";
+	char response_invalid[BUFFER_SIZE];
+	sprintf(response_invalid, "HTTP/1.1 404 Not Found\r\n"
+		 "Content-Type: text/html\r\n"
+		 "Content-Length: %d\r\n"
+		 "\r\n"
+		 "%s", (int)strlen(body_invalid), body_invalid);
+	int sending_invalid = send(*socketfd_ptr, (void *)response_invalid, strlen(response_invalid), 0);
+	if (sending_invalid < 0) perror(">>Could not sent response to client");
+	goto end_connection;
+	// Error request-answer (400 status code).
+	error_process:;
+	char body_fail[] = "<html><body><h1>Bad Request</h1></body></html>";
 	char response_fail[BUFFER_SIZE];
 	sprintf(response_fail, "HTTP/1.1 400 Bad Request\r\n"
 		 "Content-Type: text/html\r\n"
