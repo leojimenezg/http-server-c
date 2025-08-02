@@ -1,7 +1,50 @@
 <!DOCTYPE html>
-<html> 
-	<body>
-		<h1> Index Page </h1>
-		<p> This is a paragraph </p>
-	</body>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My HTTP Server in C</title>
+    <link rel="stylesheet" href="/styles">
+</head>
+<body>
+    <header>
+        <h1>HTTP Server in C Working! 🚀</h1>
+        <p>Developing with pure C and multithreading.</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>Server Characteristics</h2>
+            <ul>
+                <li>✅ Multithreading with pthread</li>
+                <li>✅ Concurrent connections control</li>    
+                <li>✅ HTTP requests parsing</li>
+                <li>✅ Resources whilelist</li>
+                <li>✅ Dynamic MIME types</li>
+                <li>✅ Big files handling</li>
+            </ul>
+        </section>
+
+        <section class="card">
+            <h2>JavaScript Interaction</h2>
+            <button id="testButton" class="btn">Click to test JS</button>
+            <p id="message" class="hidden">JavaScript working correctly! 🎉</p>
+            <div id="counter">Clics: <span id="count">0</span></div>
+        </section>
+
+        <section class="card">
+            <h2>Navigation</h2>
+            <nav>
+                <a href="/" class="btn btn-secondary">Home</a>
+                <a href="/about" class="btn btn-secondary">About</a>
+            </nav>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 - http-server-c</p>
+    </footer>
+
+    <script src="/script"></script>
+</body>
 </html>

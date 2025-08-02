@@ -1,7 +1,70 @@
 <!DOCTYPE html>
-<html>
-	<body>
-		<h1>About Page</h1>
-		<p> This is a paragraph </p>
-	</body>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About HTTP Server in C</title>
+    <link rel="stylesheet" href="/styles">
+</head>
+<body>
+    <header>
+        <h1>About the Project 📚</h1>
+        <p>Technical details about HTTP Server</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>Used Technologies</h2>
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <h3>C Language</h3>
+                    <p>Low level systems programming</p>
+                </div>
+                <div class="tech-item">
+                    <h3>Sockets</h3>
+                    <p>Network comunnication using TCP/IP</p>
+                </div>
+                <div class="tech-item">
+                    <h3>POSIX Threads</h3>
+                    <p>Concurrency handling</p>
+                </div>
+                <div class="tech-item">
+                    <h3>HTTP/1.1</h3>
+                    <p>Communication protocol version</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Arquitecture</h2>
+            <ul>
+                <li><strong>Multithreading:</strong> A thread per connection</li>
+                <li><strong>Atomic Variables:</strong> Concurrency handling</li>
+                <li><strong>Memory Management:</strong> Dynamic malloc/free</li>
+                <li><strong>File I/O:</strong> Efficient file reading</li>
+                <li><strong>Error Handling:</strong> Appropiate HTTP status codes</li>
+            </ul>
+        </section>
+
+        <section class="card">
+            <h2>JavaScript Test</h2>
+            <button id="colorButton" class="btn">Change background color</button>
+            <p id="info">This page also uses JavaScript and CSS</p>
+        </section>
+
+        <section class="card">
+            <h2>Navigation</h2>
+            <nav>
+                <a href="/" class="btn btn-secondary">Home</a>
+                <a href="/about" class="btn btn-secondary">About</a>
+            </nav>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 - http-server-c</p>
+    </footer>
+
+    <script src="/script"></script>
+</body>
 </html>

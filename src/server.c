@@ -11,6 +11,7 @@
 #define SOCKET_TYPE SOCK_STREAM
 #define MAX_PENDING 10
 #define BUFFER_SIZE 1024
+#define HEADERS_SIZE 256
 #define HTTP_VERB_LEN 7
 #define HTTP_URL_LEN 63
 
@@ -27,15 +28,16 @@ typedef struct {
 typedef struct {
 	char *url;
 	char *file_path;
+	char *file_MIME;  // Multipurpose Internet Mail Extension
 } Resource_Info;
 
 Resource_Info allowed_resources[] = {
-	{"/", "public/html/index.html"},
-	{"/index", "public/html/index.html"},
-	{"/about", "public/html/about.html"},
-	{"/styles", "public/css/styles.css"},
-	{"/script", "public/js/script.js"},
-	{"/favicon.ico", "public/assets/favicon.ico"},
+	{"/", "public/html/index.html", "text/html"},
+	{"/index", "public/html/index.html", "text/html"},
+	{"/about", "public/html/about.html", "text/html"},
+	{"/styles", "public/css/styles.css", "text/css"},
+	{"/script", "public/js/script.js", "application/javascript"},
+	{"/favicon.ico", "public/assets/favicon.ico", "image/x-icon"},
 	{NULL, NULL},
 };
 
@@ -82,7 +84,6 @@ void* handleClientConnection(void *arg) {
 		}
 	}
 	if (resource < 0) goto error_request;
-	// TODO: Handle files bigger than BUFFER_SIZE and change Content-Type.
 	FILE *file_ptr = fopen(allowed_resources[resource].file_path, "r");
 	if (file_ptr == NULL) goto error_request;
 	fseek(file_ptr, 0, SEEK_END);
@@ -96,16 +97,21 @@ void* handleClientConnection(void *arg) {
 	fread(data_ptr_heap, sizeof(char), file_size, file_ptr);
 	data_ptr_heap[file_size] = '\0';
 	fclose(file_ptr);
-	char response[BUFFER_SIZE];
 	// Successful request-answer (200 status code).
-	sprintf(response, "HTTP/1.1 200 OK\r\n"
-		 "Content-Type: text/html\r\n"
-		 "Content-Length: %d\r\n"
-		 "\r\n"
-		 "%s", file_size, data_ptr_heap);
-	int sending_ok = send(*socketfd_ptr, (void *)response, strlen(response), 0);
+	char headers[HEADERS_SIZE];
+	sprintf(headers, "HTTP/1.1 200 Ok\r\n"
+					 "Content-Type: %s\r\n"
+					 "Content-Length: %d\r\n"
+					 "\r\n", allowed_resources[resource].file_MIME, file_size);
+	int send_headers = send(*socketfd_ptr, (void *)headers, strlen(headers), 0);
+	if (send_headers < 0) {
+		perror(">>Could not sent headers to client");
+		free(data_ptr_heap);
+		goto end_connection;
+	}
+	int send_body = send(*socketfd_ptr, data_ptr_heap, file_size, 0);
+	if (send_body < 0) perror(">>Could not sent body to client");
 	free(data_ptr_heap);
-	if (sending_ok < 0) perror(">>Could not sent response to client");
 	goto end_connection;
 	// Invalid request-answer (404 status code).
 	error_request:;
