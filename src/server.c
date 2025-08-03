@@ -46,6 +46,12 @@ void errorAndExit(const char *err) {
 	exit(1);
 }
 
+/*
+ * \brief Accepts a new client connection.
+ * \param *server Struct containing the server's information.
+ * \return file-descriptor of the socket dedicated to a client connection.
+ * \return negative-int if the socket can't be created.
+*/
 int newClientConnection(Server_Info *server) {
 	socket_info_ipv4 connection_info;
 	socklen_t space = sizeof(connection_info);
@@ -53,95 +59,136 @@ int newClientConnection(Server_Info *server) {
 	return connection;
 }
 
-void* handleClientConnection(void *arg) {
-	printf(">>Thread%p: New client connection accepted\n", (void*)pthread_self());
-	fflush(stdout);
-	int *socketfd_ptr = (int*) arg;  // File descriptor allocated in heap.
-	char buffer[BUFFER_SIZE + 1];
-	int receiving = recv(*socketfd_ptr, (void *)buffer, BUFFER_SIZE, 0);
-	if (receiving < 1) goto error_process;
-	buffer[receiving] = '\0';
-	char *separation1_ptr = strchr(buffer, ' ');
-	if (separation1_ptr == NULL) goto error_process;
-	int http_verb_len = separation1_ptr - buffer;
-	if (http_verb_len > HTTP_VERB_LEN) goto error_process;
+/*
+ * \brief Validates if the HTTP verb in a request matches the expected verb.
+ * \param request Pointer to null-terminated HTTP request string.
+ * \param verb Pointer to null-terminated string containing the expected HTTP verb.
+ * \return 1 if the verb matches the expected verb.
+ * \return 0 if a valid verb was found but doesn't match the expected verb.
+ * \return -1 if no verb could be extracted or the verb length exceeds HTTP_VERB_LEN.
+*/
+int isRequestVerbValid(const char *request, const char *verb) {
+	char *separation_ptr = strchr(request, ' ');
+	if (separation_ptr == NULL) return -1;
+	int http_verb_len = separation_ptr - request;
+	if (http_verb_len > HTTP_VERB_LEN) return -1;
 	char http_verb[HTTP_VERB_LEN + 1];
-	strncpy(http_verb, buffer, http_verb_len);
+	strncpy(http_verb, request, http_verb_len);
 	http_verb[http_verb_len] = '\0';
-	if (strcmp(http_verb, "GET") != 0) goto error_process;
+	if (strcmp(http_verb, verb) == 0) return 1;
+	return 0;
+}
+
+/*
+ * \brief Validates if the URL in a request matches any of the allowed resources.
+ * \param request Pointer to null-terminated HTTP request string.
+ * \return index of the matched allowed resource.
+ * \return -1 if no url could be extracted or matched, or the url length exceeds HTTP_URL_LEN.
+*/
+int isRequestUrlResourceValid(const char *request) {
+	char *separation1_ptr = strchr(request, ' ');
+	if (separation1_ptr == NULL) return -1;
 	char *separation2_ptr = strchr(separation1_ptr + 1, ' ');
-	if (separation2_ptr == NULL) goto error_process;
-	int url_len = separation2_ptr - (separation1_ptr + 1);
-	if (url_len > HTTP_URL_LEN) goto error_process;
-	char url[HTTP_URL_LEN + 1];
-	strncpy(url, separation1_ptr + 1, url_len);
-	url[url_len] = '\0';
-	int resource = -1;
+	if (separation2_ptr == NULL) return -1;
+	int url_length = separation2_ptr - (separation1_ptr + 1);
+	if (url_length > HTTP_URL_LEN) return -1;
+	char url[url_length + 1];
+	strncpy(url, separation1_ptr + 1, url_length);
+	url[url_length] = '\0';
 	for (int i = 0; allowed_resources[i].url != NULL; i++) {
 		if (strcmp(url, allowed_resources[i].url) == 0) {
-			resource = i;
-			break;
+			return i;
 		}
 	}
-	if (resource < 0) goto error_request;
+	return -1;
+}
+
+/*
+ * \brief Sends an answer to the client using information received (headers-body).
+ * \param socketfd File descriptor of socket to be used to send answer.
+ * \param code Status code of the request.
+ * \param desc Short description of status code.
+ * \param type MIME type of the body to be sent.
+ * \param body Body to be sent.
+ * \param size Size of the body to be sent.
+ * \return 0 if the answer is successfully sent.
+ * \return -1 if the answer could not be sent.
+*/
+int sendAnswerToClient(int socketfd, int code, char *desc, char *type, int size, char *body) {
+	char headers[HEADERS_SIZE];
+	sprintf(headers, "HTTP/1.1 %d %s\r\n"
+					 "Content-Type: %s\r\n"
+					 "Content-Length: %d\r\n"
+					 "\r\n", code, desc, type, size);
+	int send_headers = send(socketfd, (void *)headers, strlen(headers), 0);
+	if (send_headers < 0) return -1;
+	if (body != NULL && size > 0) {
+		int send_body = send(socketfd, body, size, 0);
+		if (send_body < 0) return -1;
+	}
+	return 0;
+}
+
+/*
+ * \brief Gets the resource's content and answers to the client.
+ * \param socketfd File descriptor of socket to be used to send answer.
+ * \param resource Index of the allowed resource to be processed.
+ * \return 0 if the resource and answer are successfully processed.
+ * \return -1 if any of the processes fail.
+*/
+int handleResourceRequest(int socketfd, int resource) {
 	FILE *file_ptr = fopen(allowed_resources[resource].file_path, "r");
-	if (file_ptr == NULL) goto error_request;
+	if (file_ptr == NULL) return -1;
 	fseek(file_ptr, 0, SEEK_END);
 	int file_size = ftell(file_ptr);
 	fseek(file_ptr, 0, SEEK_SET);
 	char *data_ptr_heap = malloc(file_size + 1);
 	if (data_ptr_heap == NULL) {
 		fclose(file_ptr);
-		goto error_request;
+		return -1;
 	}
 	fread(data_ptr_heap, sizeof(char), file_size, file_ptr);
 	data_ptr_heap[file_size] = '\0';
 	fclose(file_ptr);
-	// Successful request-answer (200 status code).
-	char headers[HEADERS_SIZE];
-	sprintf(headers, "HTTP/1.1 200 Ok\r\n"
-					 "Content-Type: %s\r\n"
-					 "Content-Length: %d\r\n"
-					 "\r\n", allowed_resources[resource].file_MIME, file_size);
-	int send_headers = send(*socketfd_ptr, (void *)headers, strlen(headers), 0);
-	if (send_headers < 0) {
-		perror(">>Could not sent headers to client");
+	int sent = sendAnswerToClient(
+		socketfd, 200, "Ok", allowed_resources[resource].file_MIME, file_size, data_ptr_heap
+	);
+	if (sent < 0) {
 		free(data_ptr_heap);
+		return -1;
+	}
+	free(data_ptr_heap);
+	return 0;
+}
+
+void* handleClientConnection(void *arg) {
+	int *socketfd_ptr = (int*) arg;  // File descriptor allocated in heap.
+	char request[BUFFER_SIZE + 1];
+	int receiving = recv(*socketfd_ptr, (void *)request, BUFFER_SIZE, 0);
+	if (receiving < 1) {
+		char body[] = "<html><body><h1>Bad Request</h1></body></html>";
+		sendAnswerToClient(*socketfd_ptr, 400, "Bad Request", "text/html", strlen(body), body);
 		goto end_connection;
 	}
-	int send_body = send(*socketfd_ptr, data_ptr_heap, file_size, 0);
-	if (send_body < 0) perror(">>Could not sent body to client");
-	free(data_ptr_heap);
-	goto end_connection;
-	// Invalid request-answer (404 status code).
-	error_request:;
-	char body_invalid[] = "<html><body><h1>Invalid Resource</h1></body></html>";
-	char response_invalid[BUFFER_SIZE];
-	sprintf(response_invalid, "HTTP/1.1 404 Not Found\r\n"
-		 "Content-Type: text/html\r\n"
-		 "Content-Length: %d\r\n"
-		 "\r\n"
-		 "%s", (int)strlen(body_invalid), body_invalid);
-	int sending_invalid = send(*socketfd_ptr, (void *)response_invalid, strlen(response_invalid), 0);
-	if (sending_invalid < 0) perror(">>Could not sent response to client");
-	goto end_connection;
-	// Error request-answer (400 status code).
-	error_process:;
-	char body_fail[] = "<html><body><h1>Bad Request</h1></body></html>";
-	char response_fail[BUFFER_SIZE];
-	sprintf(response_fail, "HTTP/1.1 400 Bad Request\r\n"
-		 "Content-Type: text/html\r\n"
-		 "Content-Length: %d\r\n"
-		 "\r\n"
-		 "%s", (int)strlen(body_fail), body_fail);
-	int sending_fail = send(*socketfd_ptr, (void *)response_fail, strlen(response_fail), 0);
-	if (sending_fail < 0) perror(">>Could not sent response to client");
+	request[receiving] = '\0';
+	int verb = isRequestVerbValid(request, "GET");
+	if (verb < 1) {
+		char body[] = "<html><body><h1>Bad Request</h1></body></html>";
+		sendAnswerToClient(*socketfd_ptr, 400, "Bad Request", "text/html", strlen(body), body);
+		goto end_connection;
+	}
+	int resource = isRequestUrlResourceValid(request);
+	if (resource < 0) {
+		char body[] = "<html><body><h1>Not Found</h1></body></html>";
+		sendAnswerToClient(*socketfd_ptr, 404, "Not Found", "text/html", strlen(body), body);
+		goto end_connection;
+	}
+	int send_resource = handleResourceRequest(*socketfd_ptr, resource);
+	if (send_resource < 0) goto end_connection;
 	end_connection:;
 	close(*socketfd_ptr);
-	current_connections--;
 	free(socketfd_ptr);
-	printf(">>Thread%p: Closed connection with client\n", (void*)pthread_self());
-	fflush(stdout);
+	current_connections--;
 	return 0;
 }
 
@@ -172,27 +219,23 @@ int main(int argc, char **argv) {
 	while (1) {
 		if (current_connections >= server.max_current_connections) goto next_iteration;
 		int new_connection = newClientConnection(&server);
-		if (new_connection < 0) {
-			perror(">>Could not accept new client connection");
-			goto next_iteration;
-		}
+		if (new_connection < 0) goto next_iteration;
 		current_connections++;
 		int *connection_ptr_heap = malloc(sizeof(int));
 		if (connection_ptr_heap == NULL) {
-			perror(">>Could not allocate memory for new client connection");
 			close(new_connection);
 			current_connections--;
 			goto next_iteration;
 		}
 		*connection_ptr_heap = new_connection;
-		pthread_t thread; pthread_attr_t attributes;
+		pthread_t thread;
+		pthread_attr_t attributes;
 		pthread_attr_init(&attributes);
 		pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
 		if (pthread_create(&thread, &attributes, handleClientConnection, connection_ptr_heap) != 0) {
 			close(new_connection);
 			free(connection_ptr_heap);
 			current_connections--;
-			perror(">>Could not create new thread to handle client connection");
 		}
 		pthread_attr_destroy(&attributes);
 		next_iteration:;
